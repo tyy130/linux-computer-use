@@ -62,11 +62,39 @@ class LinuxComputerUse:
     """
 
     def __init__(self) -> None:
-        self.display = os.environ.get("DISPLAY")
+        self.display = os.environ.get("DISPLAY") or self._detect_x11_display()
+        if self.display and not os.environ.get("DISPLAY"):
+            # MCP servers launched by background agents often lose the desktop
+            # environment even though the user's X11 socket is still available.
+            # Export the inferred display so xdotool/scrot/import subprocesses
+            # can talk to the same Cinnamon/X11 session.
+            os.environ["DISPLAY"] = self.display
+        if not os.environ.get("XAUTHORITY"):
+            xauthority = Path.home() / ".Xauthority"
+            if xauthority.exists():
+                os.environ["XAUTHORITY"] = str(xauthority)
         self.wayland_display = os.environ.get("WAYLAND_DISPLAY")
         self.session_type = (os.environ.get("XDG_SESSION_TYPE") or "").lower()
         self._last_elements: dict[int, Element] = {}
         self._last_window: Window | None = None
+
+    def _detect_x11_display(self) -> str | None:
+        """Infer a local X11 display when launched without DISPLAY.
+
+        This is intentionally conservative: it only considers local X sockets
+        and returns the lowest numbered display. It does not invent a display on
+        headless systems, so status remains honest when no desktop is present.
+        """
+        socket_dir = Path("/tmp/.X11-unix")
+        try:
+            displays = sorted(
+                int(path.name[1:])
+                for path in socket_dir.glob("X*")
+                if path.name[1:].isdigit()
+            )
+        except OSError:
+            return None
+        return f":{displays[0]}" if displays else None
 
     def status(self) -> dict[str, Any]:
         commands = {
@@ -111,6 +139,41 @@ class LinuxComputerUse:
                 rec["titles"].append(w.title)
         return {"apps": list(by_pid.values()), "count": len(by_pid)}
 
+    def smoke_test(self) -> dict[str, Any]:
+        """Run a read-only desktop smoke test for local/Cinnamon reliability."""
+        status = self.status()
+        windows = self.list_windows(on_screen_only=True)
+        result: dict[str, Any] = {
+            "ok": bool(status["ok"]),
+            "status": status,
+            "window_count": windows["count"],
+            "capture": None,
+            "checks": [],
+        }
+        result["checks"].append({"name": "driver_available", "ok": bool(status["ok"])})
+        result["checks"].append({"name": "visible_windows", "ok": windows["count"] > 0})
+        if windows["windows"]:
+            target = next(
+                (
+                    w for w in windows["windows"]
+                    if not any(token in f"{w.get('app_name', '')} {w.get('title', '')}".lower() for token in ("desktop", "muffin guard", "cinnamon"))
+                ),
+                windows["windows"][0],
+            )
+            try:
+                shot = self.screenshot(window_id=target["window_id"])
+                result["capture"] = {
+                    "window_id": target["window_id"],
+                    "title": target.get("title", ""),
+                    "width": shot["width"],
+                    "height": shot["height"],
+                }
+                result["checks"].append({"name": "window_capture", "ok": shot["width"] > 0 and shot["height"] > 0})
+            except Exception as exc:
+                result["checks"].append({"name": "window_capture", "ok": False, "error": str(exc)})
+        result["ok"] = all(check.get("ok") for check in result["checks"])
+        return result
+
     def screenshot(self, window_id: int | None = None, format: str = "png", quality: int = 85) -> dict[str, Any]:
         image_path = self._capture_to_file(window_id=window_id)
         with Image.open(image_path) as img:
@@ -133,6 +196,8 @@ class LinuxComputerUse:
                 and e.width <= max(2, int(target.width * 1.2))
                 and e.height <= max(2, int(target.height * 1.2))
             ]
+            if not elements:
+                elements = [Element(1, "window", target.title, target.x, target.y, target.width, target.height, target.app_name, target.pid)]
         self._last_elements = {e.index: e for e in elements}
         tree = self._elements_markdown(elements, target)
         image_b64 = None
@@ -159,19 +224,19 @@ class LinuxComputerUse:
 
     # Actions -----------------------------------------------------------------
     def click(self, pid: int | None = None, window_id: int | None = None, element_index: int | None = None, x: int | None = None, y: int | None = None, modifier: list[str] | None = None) -> dict[str, Any]:
-        x, y = self._resolve_point(element_index, x, y)
+        x, y = self._resolve_point(element_index, x, y, window_id=window_id, pid=pid)
         return self._xdotool_mouse(["click", "1"], x, y, modifier=modifier)
 
     def double_click(self, **kwargs: Any) -> dict[str, Any]:
-        x, y = self._resolve_point(kwargs.get("element_index"), kwargs.get("x"), kwargs.get("y"))
+        x, y = self._resolve_point(kwargs.get("element_index"), kwargs.get("x"), kwargs.get("y"), window_id=kwargs.get("window_id"), pid=kwargs.get("pid"))
         return self._xdotool_mouse(["click", "--repeat", "2", "1"], x, y, modifier=kwargs.get("modifier"))
 
     def right_click(self, **kwargs: Any) -> dict[str, Any]:
-        x, y = self._resolve_point(kwargs.get("element_index"), kwargs.get("x"), kwargs.get("y"))
+        x, y = self._resolve_point(kwargs.get("element_index"), kwargs.get("x"), kwargs.get("y"), window_id=kwargs.get("window_id"), pid=kwargs.get("pid"))
         return self._xdotool_mouse(["click", "3"], x, y, modifier=kwargs.get("modifier"))
 
     def middle_click(self, **kwargs: Any) -> dict[str, Any]:
-        x, y = self._resolve_point(kwargs.get("element_index"), kwargs.get("x"), kwargs.get("y"))
+        x, y = self._resolve_point(kwargs.get("element_index"), kwargs.get("x"), kwargs.get("y"), window_id=kwargs.get("window_id"), pid=kwargs.get("pid"))
         return self._xdotool_mouse(["click", "2"], x, y, modifier=kwargs.get("modifier"))
 
     def drag(self, from_element: int | None = None, to_element: int | None = None, from_x: int | None = None, from_y: int | None = None, to_x: int | None = None, to_y: int | None = None, **_: Any) -> dict[str, Any]:
@@ -217,52 +282,95 @@ class LinuxComputerUse:
         target = matches[0]
         self._last_window = target
         if raise_window:
-            self._run(["xdotool", "windowactivate", str(target.window_id)])
+            self._activate_window(target.window_id)
             return {"ok": True, "message": f"raised {target.app_name} window {target.window_id}"}
         return {"ok": True, "message": f"targeted {target.app_name} window {target.window_id}; X11 actions may still require focus"}
 
     # Internals ---------------------------------------------------------------
     def _windows(self) -> list[Window]:
-        if shutil.which("xdotool"):
+        windows = self._windows_xdotool()
+        if windows:
+            return windows
+        return self._windows_wmctrl()
+
+    def _windows_xdotool(self) -> list[Window]:
+        if not shutil.which("xdotool"):
+            return []
+        try:
+            ids = self._run(["xdotool", "search", "--onlyvisible", "--name", "."], check=False).stdout.split()
+        except Exception:
+            ids = []
+        windows: list[Window] = []
+        for z, wid_text in enumerate(ids):
             try:
-                ids = self._run(["xdotool", "search", "--onlyvisible", "--name", "."], check=False).stdout.split()
+                wid = int(wid_text)
+                title = self._run(["xdotool", "getwindowname", wid_text], check=False).stdout.strip()
+                pid_out = self._run(["xdotool", "getwindowpid", wid_text], check=False).stdout.strip()
+                pid = int(pid_out) if pid_out.isdigit() else 0
+                geom = self._geometry(wid_text)
+                app = self._process_name(pid) or title.split(" - ")[-1] or "unknown"
+                windows.append(Window(
+                    window_id=wid,
+                    pid=pid,
+                    app_name=app,
+                    title=title,
+                    x=geom["x"],
+                    y=geom["y"],
+                    width=geom["width"],
+                    height=geom["height"],
+                    z_index=z,
+                ))
             except Exception:
-                ids = []
-            windows = []
-            for z, wid_text in enumerate(ids):
-                try:
-                    wid = int(wid_text)
-                    title = self._run(["xdotool", "getwindowname", wid_text], check=False).stdout.strip()
-                    pid_out = self._run(["xdotool", "getwindowpid", wid_text], check=False).stdout.strip()
-                    pid = int(pid_out) if pid_out.isdigit() else 0
-                    geom = self._geometry(wid_text)
-                    app = self._process_name(pid) or title.split(" - ")[-1] or "unknown"
-                    windows.append(Window(
-                        window_id=wid,
-                        pid=pid,
-                        app_name=app,
-                        title=title,
-                        x=geom["x"],
-                        y=geom["y"],
-                        width=geom["width"],
-                        height=geom["height"],
-                        z_index=z,
-                    ))
-                except Exception:
-                    continue
-            if windows:
-                return windows
-        return []
+                continue
+        return windows
+
+    def _windows_wmctrl(self) -> list[Window]:
+        if not shutil.which("wmctrl"):
+            return []
+        out = self._run(["wmctrl", "-lpG"], check=False).stdout
+        windows: list[Window] = []
+        for z, line in enumerate(out.splitlines()):
+            # 0x05400006  0 39585 1920 46 1920 1034 host title...
+            parts = line.split(maxsplit=8)
+            if len(parts) < 8:
+                continue
+            try:
+                wid = int(parts[0], 16)
+                pid = int(parts[2]) if parts[2].lstrip("-").isdigit() else 0
+                x, y, width, height = (int(parts[i]) for i in range(3, 7))
+            except ValueError:
+                continue
+            title = parts[8] if len(parts) > 8 else ""
+            app = self._process_name(pid) or title.split(" - ")[-1] or "unknown"
+            windows.append(Window(
+                window_id=wid,
+                pid=pid,
+                app_name=app,
+                title=title,
+                x=x,
+                y=y,
+                width=width,
+                height=height,
+                z_index=z,
+                is_on_screen=width > 0 and height > 0,
+            ))
+        return windows
 
     def _geometry(self, window_id: str) -> dict[str, int]:
-        out = self._run(["xdotool", "getwindowgeometry", "--shell", window_id], check=False).stdout
         vals: dict[str, int] = {"x": 0, "y": 0, "width": 0, "height": 0}
-        for line in out.splitlines():
-            if "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            if k.lower() in vals and re.fullmatch(r"-?\d+", v):
-                vals[k.lower()] = int(v)
+        if shutil.which("xdotool"):
+            out = self._run(["xdotool", "getwindowgeometry", "--shell", window_id], check=False).stdout
+            for line in out.splitlines():
+                if "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                if k.lower() in vals and re.fullmatch(r"-?\d+", v):
+                    vals[k.lower()] = int(v)
+            if vals["width"] > 0 and vals["height"] > 0:
+                return vals
+        for w in self._windows_wmctrl():
+            if w.window_id == int(window_id):
+                return {"x": w.x, "y": w.y, "width": w.width, "height": w.height}
         return vals
 
     def _select_window(self, pid: int | None = None, window_id: int | None = None) -> Window | None:
@@ -275,7 +383,21 @@ class LinuxComputerUse:
             for w in windows:
                 if w.pid == int(pid):
                     return w
-        return windows[0] if windows else None
+        preferred = [
+            w for w in windows
+            if not any(token in f"{w.app_name} {w.title}".lower() for token in ("desktop", "muffin guard", "cinnamon"))
+        ]
+        return (preferred or windows)[0] if windows else None
+
+    def _activate_window(self, window_id: int) -> None:
+        if shutil.which("xdotool"):
+            result = self._run(["xdotool", "windowactivate", str(window_id)], check=False)
+            if result.returncode == 0:
+                return
+        if shutil.which("wmctrl"):
+            self._run(["wmctrl", "-ia", hex(int(window_id))])
+            return
+        raise RuntimeError("No window activation command available; install xdotool or wmctrl")
 
     def _collect_elements(self, pid: int | None = None, max_elements: int = 300) -> list[Element]:
         if Atspi is None:
@@ -287,13 +409,15 @@ class LinuxComputerUse:
             app = desktop.get_child_at_index(i)
             app_name = self._safe(lambda: app.get_name(), "") or ""
             if target_name and target_name.lower() not in app_name.lower():
-                # Some apps expose a different accessible app name; keep walking if no target yet.
+                # AT-SPI app names do not always match /proc/<pid>/comm, so do
+                # not hard-skip here. Geometry filtering against the target
+                # window below is the reliable boundary.
                 pass
             self._walk_accessible(app, elements, max_elements, app_name=app_name, pid=pid or 0)
             if len(elements) >= max_elements:
                 break
-        # Re-index after filtering invalid geometry.
-        filtered = [e for e in elements if e.width > 1 and e.height > 1]
+        # Re-index after filtering invalid/unhelpful geometry.
+        filtered = [e for e in elements if self._is_useful_element(e)]
         for idx, elem in enumerate(filtered[:max_elements], start=1):
             elem.index = idx
         return filtered[:max_elements]
@@ -308,8 +432,10 @@ class LinuxComputerUse:
             comp = obj.get_component_iface()
             if comp is not None:
                 ext = comp.get_extents(Atspi.CoordType.SCREEN)  # type: ignore[union-attr]
-                if ext.width > 1 and ext.height > 1 and role not in {"filler", "panel", "application"}:
-                    out.append(Element(len(out) + 1, role, name or desc, int(ext.x), int(ext.y), int(ext.width), int(ext.height), app_name, pid))
+                label = name or desc
+                elem = Element(len(out) + 1, role, label, int(ext.x), int(ext.y), int(ext.width), int(ext.height), app_name, pid)
+                if self._is_useful_element(elem):
+                    out.append(elem)
         except Exception:
             pass
         try:
@@ -320,6 +446,25 @@ class LinuxComputerUse:
                     self._walk_accessible(child, out, max_elements, app_name, pid, depth + 1)
         except Exception:
             return
+
+
+    def _is_useful_element(self, e: Element) -> bool:
+        role = e.role.lower().strip()
+        label = (e.label or "").strip()
+        ignored_roles = {"application", "desktop frame", "filler", "panel", "separator", "unknown"}
+        if role in ignored_roles:
+            return False
+        if e.width <= 1 or e.height <= 1:
+            return False
+        if e.width > 5000 or e.height > 5000:
+            return False
+        # Large unlabeled containers create noisy SOM overlays and crowd out the
+        # controls agents can actually use. Keep common interactive/text roles
+        # even when unlabeled.
+        interactive_markers = ("button", "menu", "item", "entry", "text", "combo", "check", "radio", "tab", "link", "slider", "spin")
+        if not label and not any(marker in role for marker in interactive_markers):
+            return False
+        return True
 
     def _element_intersects_window(self, e: Element, w: Window) -> bool:
         return e.x + e.width >= w.x and e.x <= w.x + w.width and e.y + e.height >= w.y and e.y <= w.y + w.height
@@ -338,8 +483,61 @@ class LinuxComputerUse:
         cmd = self._screenshot_command(path, window_id)
         if cmd is None:
             raise RuntimeError("No screenshot command available; install scrot, gnome-screenshot, or ImageMagick import")
-        self._run(cmd)
-        return path
+        result = self._run(cmd, check=False)
+        if result.returncode == 0 and path.exists() and path.stat().st_size > 0:
+            return path
+        if window_id is not None:
+            try:
+                return self._capture_window_fallback(window_id=window_id, out_path=path)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Window capture failed via {cmd[0]} and fallback crop failed: {exc}"
+                ) from exc
+        raise RuntimeError(f"Screenshot command failed: {' '.join(cmd)}: {result.stderr.strip()}")
+
+    def _capture_window_fallback(self, window_id: int, out_path: Path) -> Path:
+        target = self._select_window(window_id=window_id)
+        if target is None:
+            raise RuntimeError(f"window {window_id} is not visible")
+        root_path = Path(tempfile.mkstemp(prefix="linux-computer-use-root-", suffix=".png")[1])
+        try:
+            root_cmd = self._root_screenshot_command(root_path)
+            if root_cmd is None:
+                raise RuntimeError("no full-screen screenshot command available")
+            # Raise before full-screen capture so occlusion is minimized. X11 can
+            # still move focus, but this is an explicit fallback after precise
+            # import -window capture failed.
+            try:
+                self._activate_window(window_id)
+                time.sleep(0.15)
+            except Exception:
+                pass
+            result = self._run(root_cmd, check=False)
+            if result.returncode != 0 or not root_path.exists() or root_path.stat().st_size == 0:
+                raise RuntimeError(f"full-screen screenshot failed: {result.stderr.strip()}")
+            with Image.open(root_path).convert("RGBA") as img:
+                left = max(0, target.x)
+                top = max(0, target.y)
+                right = min(img.width, target.x + target.width)
+                bottom = min(img.height, target.y + target.height)
+                if right <= left or bottom <= top:
+                    raise RuntimeError(f"window geometry outside screenshot bounds: {target}")
+                img.crop((left, top, right, bottom)).save(out_path)
+            return out_path
+        finally:
+            try:
+                root_path.unlink()
+            except OSError:
+                pass
+
+    def _root_screenshot_command(self, path: Path) -> list[str] | None:
+        if shutil.which("scrot"):
+            return ["scrot", str(path)]
+        if shutil.which("gnome-screenshot"):
+            return ["gnome-screenshot", "-f", str(path)]
+        if shutil.which("import"):
+            return ["import", "-window", "root", str(path)]
+        return None
 
     def _screenshot_command(self, path: Path | None = None, window_id: int | None = None) -> list[str] | None:
         if path is None:
@@ -349,13 +547,7 @@ class LinuxComputerUse:
         # the requested one and can emit an empty file in headless/agent runs.
         if window_id and shutil.which("import"):
             return ["import", "-window", str(window_id), str(path)]
-        if shutil.which("scrot"):
-            return ["scrot", str(path)]
-        if shutil.which("gnome-screenshot"):
-            return ["gnome-screenshot", "-f", str(path)]
-        if shutil.which("import"):
-            return ["import", "-window", "root", str(path)]
-        return None
+        return self._root_screenshot_command(path)
 
     def _draw_som(self, image_path: Path, elements: list[Element], target: Window) -> Path:
         out_path = image_path.with_name(image_path.stem + "-som.png")
@@ -378,15 +570,30 @@ class LinuxComputerUse:
             img.save(out_path)
         return out_path
 
-    def _resolve_point(self, element_index: int | None, x: int | None, y: int | None) -> tuple[int, int]:
+    def _resolve_point(self, element_index: int | None, x: int | None, y: int | None, window_id: int | None = None, pid: int | None = None) -> tuple[int, int]:
         if element_index is not None:
             elem = self._last_elements.get(int(element_index))
             if elem is None:
                 raise ValueError(f"Unknown element_index {element_index}; call get_window_state first")
+            self._guard_element_fresh(elem, window_id=window_id, pid=pid)
             return elem.center
         if x is None or y is None:
             raise ValueError("x/y or element_index required")
         return int(x), int(y)
+
+    def _guard_element_fresh(self, elem: Element, window_id: int | None = None, pid: int | None = None) -> None:
+        target = self._select_window(pid=pid, window_id=window_id) if (window_id is not None or pid is not None) else self._last_window
+        if target is None:
+            return
+        if window_id is not None and int(window_id) != target.window_id:
+            raise ValueError("Requested window_id does not match a visible window; refresh get_window_state")
+        if pid is not None and int(pid) != target.pid:
+            raise ValueError("Requested pid does not match a visible window; refresh get_window_state")
+        if not self._element_intersects_window(elem, target):
+            raise ValueError("Cached element no longer intersects target window; call get_window_state again")
+        cx, cy = elem.center
+        if not (target.x <= cx <= target.x + target.width and target.y <= cy <= target.y + target.height):
+            raise ValueError("Cached element center is outside target window; call get_window_state again")
 
     def _xdotool_mouse(self, click_args: list[str], x: int, y: int, modifier: list[str] | None = None) -> dict[str, Any]:
         cmd = ["xdotool", "mousemove", str(x), str(y)]

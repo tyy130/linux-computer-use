@@ -14,12 +14,30 @@ tool surface closely enough for agent backends to reuse the same workflow:
 
 ## Current support
 
-- Best path: Linux X11 sessions (`DISPLAY` set) with `xdotool`, `scrot`, and
-  AT-SPI enabled.
+- Best path: Linux X11 sessions with `xdotool`, `scrot`, ImageMagick `import`,
+  and AT-SPI enabled.
 - Works on Tyler's Cinnamon/X11 setup.
+- Agent subprocesses that lose `DISPLAY` can infer the local `:0` X11 socket and
+  `~/.Xauthority`, which keeps Hermes MCP/gateway/cron launches usable on a
+  normal logged-in desktop.
 - Wayland is detected but not full-control by default. Most compositors block
   synthetic global input by design, so the package reports this limitation
   instead of pretending it can safely drive every app.
+
+## Roadmap
+
+This repo is the wedge for an agent-native Linux workstation: reliable desktop
+control, a machine cockpit, launcher/global hotkey, timeline/Dreamer capture,
+and a packaged story that is bigger than a raw MCP server. See:
+
+- [`docs/agent-native-linux-workstation-roadmap.md`](docs/agent-native-linux-workstation-roadmap.md)
+- [`docs/agent-native-linux-workstation-demo.md`](docs/agent-native-linux-workstation-demo.md)
+
+Run the packaged local demo:
+
+```bash
+python scripts/demo_agent_native_workstation.py
+```
 
 Important limitation versus macOS `cua-driver`: X11 cannot provide the exact
 background co-working primitive Apple private APIs make possible. Actions may
@@ -47,6 +65,7 @@ sudo apt install xdotool scrot python3-gi gir1.2-atspi-2.0
 ```bash
 linux-computer-use status
 linux-computer-use doctor --json
+linux-computer-use smoke
 linux-computer-use mcp
 ```
 

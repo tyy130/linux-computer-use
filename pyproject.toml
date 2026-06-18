@@ -26,6 +26,7 @@ linux-computer-use = "linux_computer_use.cli:main"
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+pythonpath = ["src"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/linux_computer_use"]
