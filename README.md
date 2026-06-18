@@ -68,16 +68,30 @@ linux-computer-use mcp
 - `set_value`
 - `focus_app`
 
-## Hermes integration target
+## Hermes integration
 
-For Hermes Agent, the intended integration is a Linux backend that starts:
+Immediate path via Hermes native MCP client:
+
+```yaml
+mcp_servers:
+  linux_computer_use:
+    command: linux-computer-use
+    args: ["mcp"]
+```
+
+Restart Hermes after adding that block to `~/.hermes/config.yaml`. Tools will
+appear with names like `mcp_linux_computer_use_get_window_state` and
+`mcp_linux_computer_use_click`.
+
+Longer-term first-class path: Hermes can add a Linux backend for the existing
+generic `computer_use` tool that starts:
 
 ```bash
 linux-computer-use mcp
 ```
 
-and maps the existing generic `computer_use` tool to the MCP tools above. The
-model-facing schema does not need to change.
+and maps the current single model-facing `computer_use` schema to the MCP tools
+above. The model-facing schema does not need to change.
 
 ## Safety model
 
