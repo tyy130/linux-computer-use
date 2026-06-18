@@ -68,11 +68,11 @@ AI Agents — https://www.producthunt.com/categories/ai-agents
 - Demo video: [to be added after recording]
 
 ## Images to upload
-1. `assets/full_desktop.png` — full desktop showing driver operating real apps
-2. `assets/window_chrome_2097156.png` — Chromium window with SOM overlay
-3. `assets/window_gnome-terminal-_88080390.png` — terminal showing smoke test output
-4. `assets/live_coverage.json` — reference: 4/4 app classes passed coverage
-5. GIF demo: to be recorded (see scripts/record_demo.sh)
+1. `assets/ph_01_hero.png` — clean hero section with feature overview
+2. `assets/ph_02_smoke_terminal.png` — terminal showing smoke test output
+3. `assets/ph_03_coverage_results.png` — live GUI coverage results (4/4 apps passed)
+4. `assets/ph_04_architecture.png` — system architecture diagram
+5. GIF demo: use `scripts/record_demo.sh` to capture a live demo
 
 ## Topics / Tags
 ai-agents, linux, desktop-automation, mcp, computer-use, x11, accessibility
