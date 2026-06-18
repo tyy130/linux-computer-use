@@ -170,6 +170,10 @@ class LinuxComputerUse:
         x, y = self._resolve_point(kwargs.get("element_index"), kwargs.get("x"), kwargs.get("y"))
         return self._xdotool_mouse(["click", "3"], x, y, modifier=kwargs.get("modifier"))
 
+    def middle_click(self, **kwargs: Any) -> dict[str, Any]:
+        x, y = self._resolve_point(kwargs.get("element_index"), kwargs.get("x"), kwargs.get("y"))
+        return self._xdotool_mouse(["click", "2"], x, y, modifier=kwargs.get("modifier"))
+
     def drag(self, from_element: int | None = None, to_element: int | None = None, from_x: int | None = None, from_y: int | None = None, to_x: int | None = None, to_y: int | None = None, **_: Any) -> dict[str, Any]:
         sx, sy = self._resolve_point(from_element, from_x, from_y)
         tx, ty = self._resolve_point(to_element, to_x, to_y)

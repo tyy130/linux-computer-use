@@ -68,6 +68,12 @@ def right_click(element_index: int | None = None, x: int | None = None, y: int |
 
 
 @mcp.tool()
+def middle_click(element_index: int | None = None, x: int | None = None, y: int | None = None, modifier: list[str] | None = None) -> dict[str, Any]:
+    """Middle-click an element or coordinate."""
+    return driver.middle_click(element_index=element_index, x=x, y=y, modifier=modifier)
+
+
+@mcp.tool()
 def drag(from_element: int | None = None, to_element: int | None = None, from_x: int | None = None, from_y: int | None = None, to_x: int | None = None, to_y: int | None = None) -> dict[str, Any]:
     """Drag from one element/coordinate to another."""
     return driver.drag(from_element=from_element, to_element=to_element, from_x=from_x, from_y=from_y, to_x=to_x, to_y=to_y)

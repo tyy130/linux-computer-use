@@ -60,6 +60,7 @@ linux-computer-use mcp
 - `click`
 - `double_click`
 - `right_click`
+- `middle_click`
 - `drag`
 - `scroll`
 - `type_text`
