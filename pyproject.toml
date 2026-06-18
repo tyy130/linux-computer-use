@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "linux-computer-use"
+version = "0.1.0"
+description = "Linux desktop computer-use MCP driver for AI agents"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "TacticDev" }]
+keywords = ["mcp", "computer-use", "linux", "desktop-automation", "ai-agents"]
+dependencies = [
+  "mcp>=1.0.0",
+  "pillow>=10.0.0",
+  "PyGObject>=3.42; platform_system=='Linux'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+linux-computer-use = "linux_computer_use.cli:main"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/linux_computer_use"]
