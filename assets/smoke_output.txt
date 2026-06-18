@@ -1,0 +1,5 @@
+linux-computer-use 0.1.0 smoke
+  ✓ driver_available
+  ✓ visible_windows
+  ✓ window_capture
+capture: 1920x1080 window=2097156 Product Hunt – The best new products in tech. - Chromium

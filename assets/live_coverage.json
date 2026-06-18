@@ -1,0 +1,76 @@
+{
+  "ok": false,
+  "results": [
+    {
+      "label": "GTK dialog",
+      "ok": true,
+      "window": {
+        "window_id": 98566152,
+        "pid": 56366,
+        "app_name": "zenity",
+        "title": "Coverage Dialog",
+        "width": 444,
+        "height": 134
+      },
+      "capture": {
+        "width": 444,
+        "height": 134
+      },
+      "state": {
+        "summary": "\u2705 zenity \u2014 1 elements",
+        "elements": 1
+      },
+      "error": null
+    },
+    {
+      "label": "Chromium",
+      "ok": true,
+      "window": {
+        "window_id": 2097156,
+        "pid": 22718,
+        "app_name": "chrome",
+        "title": "Product Hunt \u2013 The best new products in tech. - Chromium",
+        "width": 1920,
+        "height": 1080
+      },
+      "capture": {
+        "width": 1920,
+        "height": 1080
+      },
+      "state": {
+        "summary": "\u2705 chrome \u2014 1 elements",
+        "elements": 1
+      },
+      "error": null
+    },
+    {
+      "label": "Terminal",
+      "ok": true,
+      "window": {
+        "window_id": 88108856,
+        "pid": 6888,
+        "app_name": "gnome-terminal-",
+        "title": "tdev | idle | /home/tyler",
+        "width": 858,
+        "height": 962
+      },
+      "capture": {
+        "width": 858,
+        "height": 962
+      },
+      "state": {
+        "summary": "\u2705 gnome-terminal- \u2014 1 elements",
+        "elements": 1
+      },
+      "error": null
+    },
+    {
+      "label": "Drawing",
+      "ok": false,
+      "window": null,
+      "capture": null,
+      "state": null,
+      "error": "no matching window for ('drawing', 'pencil', 'unsaved file')"
+    }
+  ]
+}
